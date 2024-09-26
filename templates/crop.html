@@ -568,9 +568,9 @@
                       </button>
                       <input type="range" min="0" max="1" step="any" />
                       <div class="video-timer">
-                        <p class="current-time">18:00:56</p>
+                        <p class="current-time">00:00:00</p>
                         <p class="separator">/</p>
-                        <p class="video-duration">00:00</p>
+                        <p class="video-duration">00:00:00</p>
                       </div>
                     </li>
                     <li class="options center">
@@ -800,6 +800,7 @@
   // Function to convert time in HH:MM:SS format to seconds
   function timeToSeconds(time) {
     const parts = time.split(':');
+    console.log(parts);
     const hours = parseInt(parts[0], 10);
     const minutes = parseInt(parts[1], 10);
     const seconds = parseInt(parts[2], 10);
@@ -820,14 +821,16 @@
   // Function to handle cropping and downloading with adjusted time
   function cropAndDownload() {
     // Get the start_time and end_time elements by ID
-    const start_time_input = document.getElementById('start_time');
-    const end_time_input = document.getElementById('end_time');
-    console.log("hi dinesh start time from cropandDownload--->> ",start_time_input)
-    console.log("hi dinesh end time from cropandDownload--->> ",end_time_input)
+    const start_time_input = document.querySelector("#start_time")
+    const end_time_input = document.querySelector('#end_time');
+    console.log("hi dinesh start time from cropandDownload--->> ",start_time_input.value)
+    console.log("hi dinesh end time from cropandDownload--->> ",end_time_input.value)
 
     // Get the adjusted start and end times
     const start_time = adjustTime(start_time_input.value);
     const end_time = adjustTime(end_time_input.value);
+    console.log(start_time);
+    
  const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
     fetch('/crop-video/', {
       method: 'POST',
@@ -860,9 +863,6 @@
         endTimeSlider.addEventListener('input', function() {
             endTimeInput.value = secondsToTime(endTimeSlider.value);
         });
-
-
-
     </script>
   </body>
 </html>

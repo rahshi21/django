@@ -14,9 +14,18 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'pro1.settings')
 application = get_wsgi_application()
 import os
 import pytesseract
+import subprocess
 import cv2
 from django.conf.urls.static import static
 from datetime import datetime, timedelta
+import json
+
+
+
+# Define constants
+ffmpeg_path = r'C:\Users\DINESH\Documents\XOW\DJANGO\exhibitonwatch-Web-App\pro1\ffmpeg-v1\bin\ffmpeg.exe'
+#create a Tesseract OCR instance 
+pytesseract.pytesseract.tesseract_cmd = os.path.join(os.path.dirname(__file__), "Tesseract-OCR", "tesseract.exe")
 
 config = {
 
@@ -93,8 +102,6 @@ def create(request):
     return render(request,'upload.html',{"name":name})
 
 def post_create(request):
-
-
     millis = "videourls"
     # print("mili"+str(millis))
     url = request.POST.get('url')
@@ -162,8 +169,7 @@ def post_createcsv(request):
     # Replace 'path/to/your/video.mp4' with the actual path to your video file
     video_path = video_url
     
-    #create a Tesseract OCR instance 
-    pytesseract.pytesseract.tesseract_cmd = os.path.join(os.path.dirname(__file__), "Tesseract-OCR", "tesseract.exe")
+    
     
     # Open the video file
     cap = cv2.VideoCapture(video_path)
@@ -203,7 +209,6 @@ def post_createcsv(request):
         # Define the region to crop timestamp
         x, y, w, h = 0, 0, 1000, 100
         timestamp_crop = frame[y:y+h, x:x+w]
-        print("hi this is from timestamp_crop ---> ",timestamp_crop)
 
         # Perform OCR to extract text from the timestamp region
         text = pytesseract.image_to_string(timestamp_crop, lang='eng', config='--psm 6')
@@ -232,7 +237,7 @@ def post_createcsv(request):
     _, timestamp_thresh = cv2.threshold(timestamp_gray, 127, 255, cv2.THRESH_BINARY)
 
     # Save the processed image
-    cv2.imwrite("frame.jpg", timestamp_thresh)
+    cv2.imwrite("frame_1.jpg", timestamp_thresh)
     text_sp = text.split("Time: ")[1].split(" Frame:")[0]
     time1= text_sp.split(":")
     hours = int(time1[0])
@@ -244,7 +249,6 @@ def post_createcsv(request):
     return render(request, 'videopage.html', {'i': video_url,'e':csv_url,'time':int(total_seconds),'hr':int(hours),'min':int(minutes),'sec':int(seconds),'duration':int(video_duration_seconds),})
     
 def crop(request):
-
     idtoken = request.session['uid']
     a = authe.get_account_info(idtoken)
     a = a['users']
@@ -252,37 +256,148 @@ def crop(request):
     a = a['localId']
     video_url = database.child('users').child(a).child('reports').child('videourls').child('url').get().val()
 
-    return render(request,'crop.html', {'i': video_url,}) 
+    return render(request, 'crop.html', {'i': video_url,})
+def extract_timestamp(frame, x=0, y=0, w=1000, h=100):
+    try:
+        timestamp_crop = frame[y:y+h, x:x+w]
+        timestamp_grey = cv2.cvtColor(timestamp_crop, cv2.COLOR_BGR2GRAY)
+        _, timestamp_thresh = cv2.threshold(timestamp_grey, 127, 255, cv2.THRESH_BINARY)
+        cv2.imwrite("frame_2.jpg",timestamp_thresh)
+        candidate_str = pytesseract.image_to_string(timestamp_thresh, config='--psm 6')
+        
+        regex_str = r'Date:\s(\d{4}-\d{2}-\d{2})\sTime:\s(\d{2}:\d{2}:\d{2}\s(?:AM|PM))\sFrame:\s(\d{2}:\d{2}:\d{2}:\d{2})'
+        match = re.search(regex_str, candidate_str)
+        
+        if match:
+            date_str, time_str, frame_str = match.groups()
+            return date_str, time_str, frame_str
+    except Exception as e:
+        print(f"Error extracting timestamp: {e}")
+    return None, None, None
+
+def get_video_timestamp(video_path, frame_position):
+    cap = cv2.VideoCapture(video_path)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_position)
+    ret, frame = cap.read()
+    cap.release()
+    if ret:
+        return extract_timestamp(frame)
+    return None, None, None
+
+def get_initial_time(video_path):
+    date_str, time_str, _ = get_video_timestamp(video_path, 0)
+    return time_str if time_str else "00:00:00 AM"
+
+def get_video_end_time(video_path):
+    cap = cv2.VideoCapture(video_path)
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    date_str, time_str, _ = get_video_timestamp(video_path, frame_count - 1)
+    cap.release()
+    return time_str if time_str else "00:00:00 AM"
+
+def parse_time(time_str):
+    try:
+        return datetime.strptime(time_str, '%I:%M:%S %p')
+    except ValueError:
+        pass
+    
+    try:
+        return datetime.strptime(time_str, '%H:%M:%S')
+    except ValueError:
+        return None
+
+def time_to_seconds(time_str):
+    dt = parse_time(time_str)
+    if dt:
+        return dt.hour * 3600 + dt.minute * 60 + dt.second
+    return 0
+
+def seconds_to_time(seconds):
+    return str(timedelta(seconds=seconds))
+
+def download_video(video_path):
+    response = requests.get(video_path, stream=True)
+    if response.status_code != 200:
+        raise Exception("Failed to download video file")
+    
+    input_video_path = os.path.normpath(os.path.join(os.getcwd(), 'downloaded_video.mp4'))
+    with open(input_video_path, 'wb') as f:
+        for chunk in response.iter_content(chunk_size=1024):
+            f.write(chunk)
+    
+    return input_video_path
+
+def crop_video_req(input_video_path, start_time_sec, end_time_sec):
+    
+    output_video_path = os.path.normpath(os.path.join(os.getcwd(), 'output_cropped_video.mp4'))
+    
+    ffmpeg_cmd = [
+        ffmpeg_path,
+        '-y',
+        '-i', input_video_path,
+        '-ss', str(start_time_sec),
+        '-to', str(end_time_sec),
+        '-c:v', 'libx264',
+        '-crf', 23,
+        '-preset', 'fast',
+        '-c:a', 'aac',
+        '-strict', 'experimental',
+        output_video_path
+    ]
+    
+    try:
+        subprocess.run(ffmpeg_cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        raise Exception(f"FFmpeg error: {str(e)}")
+    
+    if not os.path.exists(output_video_path):
+        raise Exception("Failed to crop video")
+    
+    return output_video_path
 
 def crop_video(request):
-    if request.method == 'POST':
-        try:
-            start_time_str = request.POST.get('start_time')
-            end_time_str = request.POST.get('end_time')
-            print(f"hi dinesh it the start time from crop--->>>{start_time_str}")
-            print(f"hi dinesh it the end time from crop--->>>{end_time_str}")
+    idtoken = request.session['uid']
+    a = authe.get_account_info(idtoken)
+    a = a['users']
+    a = a[0]
+    a = a['localId']
+    video_url = database.child('users').child(a).child('reports').child('videourls').child('url').get().val()
+    video_path=video_url
+    initial_time_str=get_initial_time(video_path)
+    input_video_path=download_video(video_path)
 
-            # Convert start and end times from HH:MM:SS to seconds
-            start_time = sum(x * int(t) for x, t in zip([3600, 60, 1], start_time_str.split(':')))
-            end_time = sum(x * int(t) for x, t in zip([3600, 60, 1], end_time_str.split(':')))
-
-            if start_time >= end_time:
-                return HttpResponse("Invalid time range", status=400)
-
-            input_video_path = "Trial with 5MP camera (1).mp4"  # Replace with your input video path
-            output_video_path = "output_cropped_video.mp4"
-
-            ffmpeg_extract_subclip(input_video_path, start_time, end_time, targetname=output_video_path)
-
-            with open(output_video_path, 'rb') as video_file:
-                response = HttpResponse(video_file.read(), content_type='video/mp4')
-                response['Content-Disposition'] = 'attachment; filename="cropped_video.mp4"'
-                return response
-
-        except Exception as e:
-            print(f"ERROR:{str(e)}")
-            return HttpResponse(str(e), status=500)
-    else:
+    if request.method != 'POST':
         return HttpResponse("Invalid request method", status=405)
     
+    try:
+        data = json.loads(request.body)
+        start_time_str = data.get("start_time")
+        end_time_str = data.get("end_time")
+        print(f"Hi its start time-->{start_time_str}")
+        print(f"Hi its end time-->{end_time_str}")
+        
+        start_time_sec = time_to_seconds(start_time_str)
+        end_time_sec = time_to_seconds(end_time_str)
+        initial_time_sec = time_to_seconds(initial_time_str)
+        
+        start_time_sec -= initial_time_sec
+        end_time_sec -= initial_time_sec
+        print(f"Hi its start time-->{start_time_sec}")
+        print(f"Hi its End time-->{end_time_sec}")
+        
+        
+        if start_time_sec >= end_time_sec:
+            return HttpResponse("Invalid start or end time", status=400)
+        
+        cropped_video_path = crop_video_req(input_video_path, start_time_sec, end_time_sec)
+        
+        return serve_cropped_video(cropped_video_path)
+    
+    except Exception as e:
+        return HttpResponse(f"Error: {str(e)}", status=500)
 
+def serve_cropped_video(output_video_path):
+    with open(output_video_path, 'rb') as video_file:
+        response = HttpResponse(video_file.read(), content_type='video/mp4')
+        response['Content-Disposition'] = 'attachment; filename="cropped_video.mp4"'
+        return response
