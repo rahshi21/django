@@ -329,6 +329,7 @@ def download_video(video_path):
 
 def crop_video_req(input_video_path, start_time_sec, end_time_sec):
     
+    ffmpeg_path =os.path.join(os.path.dirname(__file__), "ffmpeg-v1", "bin", "ffmpeg.exe")
     output_video_path = os.path.normpath(os.path.join(os.getcwd(), 'output_cropped_video.mp4'))
     
     ffmpeg_cmd = [
