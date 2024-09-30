@@ -23,7 +23,8 @@ import json
 
 
 # Define constants
-ffmpeg_path = r'C:\Users\DINESH\Documents\XOW\DJANGO\exhibitonwatch-Web-App\pro1\ffmpeg-v1\bin\ffmpeg.exe'
+VIDEO_QUALITY = 18
+VIDEO_PRESET = 'medium'
 #create a Tesseract OCR instance 
 pytesseract.pytesseract.tesseract_cmd = os.path.join(os.path.dirname(__file__), "Tesseract-OCR", "tesseract.exe")
 
@@ -257,6 +258,7 @@ def crop(request):
     video_url = database.child('users').child(a).child('reports').child('videourls').child('url').get().val()
 
     return render(request, 'crop.html', {'i': video_url,})
+
 def extract_timestamp(frame, x=0, y=0, w=1000, h=100):
     try:
         timestamp_crop = frame[y:y+h, x:x+w]
@@ -328,10 +330,9 @@ def download_video(video_path):
     return input_video_path
 
 def crop_video_req(input_video_path, start_time_sec, end_time_sec):
-    
     ffmpeg_path =os.path.join(os.path.dirname(__file__), "ffmpeg-v1", "bin", "ffmpeg.exe")
-    output_video_path = os.path.normpath(os.path.join(os.getcwd(), 'output_cropped_video.mp4'))
     
+    output_video_path = os.path.normpath(os.path.join(os.getcwd(), 'output_cropped_video.mp4'))
     ffmpeg_cmd = [
         ffmpeg_path,
         '-y',
@@ -339,8 +340,8 @@ def crop_video_req(input_video_path, start_time_sec, end_time_sec):
         '-ss', str(start_time_sec),
         '-to', str(end_time_sec),
         '-c:v', 'libx264',
-        '-crf', 23,
-        '-preset', 'fast',
+        '-crf', str(VIDEO_QUALITY),
+        '-preset', VIDEO_PRESET,
         '-c:a', 'aac',
         '-strict', 'experimental',
         output_video_path
@@ -348,12 +349,12 @@ def crop_video_req(input_video_path, start_time_sec, end_time_sec):
     
     try:
         subprocess.run(ffmpeg_cmd, check=True)
+        print("outputpath--->>>{output_video_path}")
     except subprocess.CalledProcessError as e:
         raise Exception(f"FFmpeg error: {str(e)}")
     
     if not os.path.exists(output_video_path):
         raise Exception("Failed to crop video")
-    
     return output_video_path
 
 def crop_video(request):
@@ -364,7 +365,8 @@ def crop_video(request):
     a = a['localId']
     video_url = database.child('users').child(a).child('reports').child('videourls').child('url').get().val()
     video_path=video_url
-    initial_time_str=get_initial_time(video_path)
+    initial_time_str =str(get_initial_time(video_path))
+    # initial_time_str=initial_time[1:8]
     input_video_path=download_video(video_path)
 
     if request.method != 'POST':
@@ -379,7 +381,7 @@ def crop_video(request):
         
         start_time_sec = time_to_seconds(start_time_str)
         end_time_sec = time_to_seconds(end_time_str)
-        initial_time_sec = time_to_seconds(initial_time_str)
+        initial_time_sec= time_to_seconds(initial_time_str)
         
         start_time_sec -= initial_time_sec
         end_time_sec -= initial_time_sec
@@ -391,7 +393,6 @@ def crop_video(request):
             return HttpResponse("Invalid start or end time", status=400)
         
         cropped_video_path = crop_video_req(input_video_path, start_time_sec, end_time_sec)
-        
         return serve_cropped_video(cropped_video_path)
     
     except Exception as e:
